@@ -126,15 +126,15 @@ class ButtleLineEnv(TurnBase2Player):
         self.checkFlag(action%9, my_player, enemy_player, self.turn)
 
         # 加点計算
-        add_score = add_num_max = add = 0.0
+        add_score = add_num_sum = add = 0.0
 
         if l == 2:
             # 役ができたら加点
-            add_score, add_num_max = self.add(w, my_player)
-            add = 0.1 * add_score + 0.01 * add_num_max
+            add_score, add_num_sum = self.add(w, my_player)
+            add = 0.1 * add_score + 0.01 * add_num_sum
         elif l == 1:
             # 自分が作れる最大の役を予測
-            add_score, add_num_max = self.estimate(w, my_player, enemy_player)
+            add_score, add_num_sum = self.estimate(w, my_player, enemy_player)
             add = 0.1 * (add_score - 1)
 
         # 勝敗判定
@@ -278,17 +278,17 @@ class ButtleLineEnv(TurnBase2Player):
         if len(my_player_cards) == 3 and len(enemy_player_cards) == 3:
             
             # それぞれの役を取得 
-            sScore, sMax = self.action_ai.score(my_player_cards)
-            eScore, eMax = self.action_ai.score(enemy_player_cards)
+            sScore, sSum = self.action_ai.score(my_player_cards)
+            eScore, eSum = self.action_ai.score(enemy_player_cards)
 
             if sScore > eScore:
                 self.flags[layout_num]['owner'] = my_player
             elif sScore < eScore:
                 self.flags[layout_num]['owner'] = enemy_player
             else:
-                if sMax > eMax:
+                if sSum > eSum:
                     self.flags[layout_num]['owner'] = my_player
-                elif sMax < eMax:
+                elif sSum < eSum:
                     self.flags[layout_num]['owner'] = enemy_player
                 else:
                     if turn%2 == 1:
@@ -318,14 +318,14 @@ class ButtleLineEnv(TurnBase2Player):
                     lPlayer = enemy_player
     
                 # 最大（予測）の役
-                eScore, eMax = self.action_ai.judge(self.layout[ePlayer], self.layout[lPlayer], self.hands[ePlayer], judge)
+                eScore, eSum = self.action_ai.judge(self.layout[ePlayer], self.layout[lPlayer], self.hands[ePlayer], judge)
                 
                 # 確定の役
-                lScore, lMax = self.action_ai.score(self.layout[lPlayer][judge])
+                lScore, lSum = self.action_ai.score(self.layout[lPlayer][judge])
 
                 if lScore > eScore:
                     self.flags[judge]['owner'] = lPlayer
-                elif lScore == eScore and lMax >= eMax:
+                elif lScore == eScore and lSum >= eSum:
                     self.flags[judge]['owner'] = lPlayer
 
     def winner(self):
@@ -360,20 +360,20 @@ class ButtleLineEnv(TurnBase2Player):
             eStock = list(itertools.filterfalse(lambda x: x['color'] == ls['color'] and x['number'] == ls['number'], eStock))
 
         # 自分の最大の役を予測
-        eScore = eMax = 0
+        eScore = eSum = 0
 
         for x in range(len(eStock) - 2):
             # 場の状態
             eLayout = copy.deepcopy(self.layout[my_player][w])
             eLayout.append(eStock[x])
            
-            score, max = self.action_ai.score(eLayout)
+            score, sum = self.action_ai.score(eLayout)
 
             if score > eScore:
                 eScore = score
-                eMax = max
+                eSum = sum
         
-        return eScore, eMax
+        return eScore, eSum
 
 class LayerProcessor(Processor):
 

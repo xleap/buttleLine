@@ -56,19 +56,19 @@ class AI():
     def winnerCheck(self, layout, other_layout, hand, layout_num, card_num):
         
         eScore = 0
-        eMax = 0
+        eSum = 0
 
         if len(layout[layout_num]) == 2 and len(other_layout[layout_num]) == 3:
-            eScore, eMax = self.judge(layout, other_layout, hand, layout_num)
+            eScore, eSum = self.judge(layout, other_layout, hand, layout_num)
             cards = copy.deepcopy(layout[layout_num])
             cards.append(hand[card_num])
 
             # 出そうとしている役
-            lScore, lMax = self.score(cards)
+            lScore, lSum = self.score(cards)
 
             if lScore > eScore:
                 return True
-            elif lScore == eScore and lMax > eMax:
+            elif lScore == eScore and lSum > eSum:
                 return True
             else:
                 # 負け確
@@ -79,8 +79,8 @@ class AI():
     def judge(self, layout, other_layout, hand, layout_num):
         
         if len(other_layout) == 3:
-            score, max = self.score(other_layout)
-            return score, max
+            score, sum = self.score(other_layout)
+            return score, sum
         
         # 予測する場のカード
         cards = layout[layout_num]
@@ -98,7 +98,7 @@ class AI():
 
         # 場と手札から相手の最大の役を予測
         eScore = 0
-        eMax = 0
+        eSum = 0
 
         for x in range(len(eStock)-len(cards)):
             # 場の状態
@@ -108,13 +108,13 @@ class AI():
             for i in range(len(eLayout), 3, 1):
                 eLayout.append(eStock[x+i])
             
-            score, max = self.score(eLayout)
+            score, sum = self.score(eLayout)
 
             if score > eScore:
                 eScore = score
-                eMax = max
+                eSum = sum
         
-        return eScore, eMax
+        return eScore, eSum
 
     def isThree(self, cards):
         return cards[0]['number'] == cards[1]['number'] and cards[1]['number'] == cards[2]['number']
@@ -129,7 +129,7 @@ class AI():
         # 数字の配列を生成(昇順)
         numList = [i['number'] for i in cards]
         numList.sort()
-        max = numList[2]
+        sum = numList[0] + numList[1] + numList[2]
 
         if self.isFlush(cards) and self.isStraight(numList):
             score = 5
@@ -141,4 +141,4 @@ class AI():
             score = 2
         else:
             score = 1
-        return score, max
+        return score, sum
