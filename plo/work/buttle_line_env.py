@@ -453,16 +453,25 @@ class alpha():
                 else:
                     print('最終抽選', file=sys.stderr) 
 
+                    layout = env.layout[player]
+                    hand = env.hands[player]
                     score = sum = 0
                     
-                    for c in range(len(env.hands)):
-                        for w in range(self.W):
-                            if not env.flags[w]['owner'] and env.layout[player][w] < 3:
-                                cards = copy.deepcopy(self.layout[player][w])
-                                cards.append(env.hands[c])
-                                eScore, eSum = self.action_ai.score(cards)
+                    for c in range(len(hand)):
+                        for w in range(len(layout)):
+                            if env.flags[w]['owner'] is None and len(layout[w]) < 3:
 
+                                eScore = eSum = 0
+
+                                if  len(layout[w]) == 2:
+                                    cards = copy.deepcopy(layout[w])
+                                    cards.append(hand[c])
+                                    eScore, eSum = env.action_ai.score(cards)
+
+                                # 期待値が一番高いものを選択（勝てるとは限らない）
                                 if (score == 0 and sum == 0) or eScore > score or (eScore == score and eSum > sum):
+                                    score = eScore
+                                    sum = eSum
                                     num = c
                                     choice = w
 
