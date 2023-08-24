@@ -268,14 +268,28 @@ class Environment():
         return score, sum
     
     def winner(self):
-        s,e = 0,0
-        for i in range(0, len(self.flags), 1):
-            if self.flags[i]['owner'] == 0:
-                s = s+1
-            elif self.flags[i]['owner'] == 1:
-                e = e+1
         
-        return s,e
+        winner = None
+        s,e = 0,0
+        for i in range(len(self.flags)):
+
+            # 3連続チェック
+            if self.flags[i]['owner']:
+                if i < 7:
+                    if self.flags[i]['owner'] == self.flags[i+1]['owner'] and self.flags[i+1]['owner'] == self.flags[i+2]['owner']:
+                        return self.flags[i]['owner']
+
+            if self.flags[i]['owner'] == 0:
+                s += 1
+            elif self.flags[i]['owner'] == 1:
+                e += 1
+        
+        if s >= 5:
+            winner = 0
+        elif e >= 5:
+            winner = 1
+
+        return winner
 
 def get_action(layout, other_layout, flags, hand, other_hand_length, stock_length, play_first):
 
@@ -342,19 +356,13 @@ if __name__ == "__main__":
             local.print()
             player = (player+1)%2
 
-            s,e = local.winner()
+            winner = local.winner()
 
-            if s == 3 and e == 0:
+            if winner == 0:
                 print('player0 win!!')
                 break
-            elif s == 0 and e == 3:
+            elif winner == 1:
                 print('player1 win!!')
-                break
-            elif  s >= 5 or e>= 5:
-                if s > e:
-                    print('player0 win!!')
-                else:
-                    print('player1 win!!')
                 break
 
         break

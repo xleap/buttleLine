@@ -138,35 +138,17 @@ class ButtleLineEnv(TurnBase2Player):
             add = 0.1 * (add_score - 1)
 
         # 勝敗判定
-        s,e = self.winner()
+        winner = self.winner()
 
         # 報酬設定
-        if s == 3 and e == 0:
+        if winner == 0:
             self.step_rewards[0] += 1.0
             self.step_rewards[1] -= 1.0
             self.done = True
-        elif s == 0 and e == 3:
+        elif winner == 1:
             self.step_rewards[0] -= 1.0
             self.step_rewards[1] += 1.0
             self.done = True
-        elif  s >= 5 or e >= 5:
-            if s > e:
-                self.step_rewards[0] += 1.0
-                self.step_rewards[1] -= 1.0
-                self.done = True
-            else:
-                self.step_rewards[0] -= 1.0
-                self.step_rewards[1] += 1.0
-                self.done = True
-        else:
-            if len(self.invalid_actions[0]) == self.W * self.C:
-                self.step_rewards[0] -= 1.0
-                self.step_rewards[1] += 1.0
-                self.done = True
-            elif len(self.invalid_actions[1]) == self.W * self.C:
-                self.step_rewards[0] += 1.0
-                self.step_rewards[1] -= 1.0
-                self.done = True
 
         # 手番交代
         self._next_player_index = enemy_player
@@ -330,14 +312,27 @@ class ButtleLineEnv(TurnBase2Player):
 
     def winner(self):
         
+        winner = None
         s,e = 0,0
         for i in range(len(self.flags)):
+
+            # 3連続チェック
+            if self.flags[i]['owner']:
+                if i < 7:
+                    if self.flags[i]['owner'] == self.flags[i+1]['owner'] and self.flags[i+1]['owner'] == self.flags[i+2]['owner']:
+                        return self.flags[i]['owner']
+
             if self.flags[i]['owner'] == 0:
                 s += 1
             elif self.flags[i]['owner'] == 1:
                 e += 1
         
-        return s,e
+        if s >= 5:
+            winner = 0
+        elif e >= 5:
+            winner = 1
+
+        return winner
     
     def add(self, w, my_player):
     
@@ -439,7 +434,7 @@ class alpha():
             try:
                 action = worker.policy(env)
             except:
-                print('error', file=sys.stderr) 
+                print('リトライ', file=sys.stderr) 
                 continue
             
             # 置く場所
@@ -447,13 +442,28 @@ class alpha():
             # 選択したカードの番号
             num = action//9
 
-            # 3枚以上置かれている反則手
-            if(len(env.layout[player][choice]) > 2):
+            # 反則手(3枚以上置かれている、またはフラッグ獲得済)
+            if(len(env.layout[player][choice]) > 2 or env.flags[choice]['owner']):
                 
                 # 20回連続はゲーム側の問題のため続行
                 if(foul_count < 20):
                     foul_count += 1
-                    print('反則手{}回目'.format(foul_count), file=sys.stderr) 
+                    print('再抽選{}回目'.format(foul_count), file=sys.stderr) 
                     continue
+                else:
+                    print('最終抽選', file=sys.stderr) 
+
+                    score = sum = 0
+                    
+                    for c in range(len(env.hands)):
+                        for w in range(self.W):
+                            if not env.flags[w]['owner'] and env.layout[player][w] < 3:
+                                cards = copy.deepcopy(self.layout[player][w])
+                                cards.append(env.hands[c])
+                                eScore, eSum = self.action_ai.score(cards)
+
+                                if (score == 0 and sum == 0) or eScore > score or (eScore == score and eSum > sum):
+                                    num = c
+                                    choice = w
 
             return num, choice    
