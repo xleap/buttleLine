@@ -7,26 +7,11 @@ import copy
 import itertools
 from itertools import combinations
 import action
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
 import buttle_line_env
 
-class Flag():
-
-     def __init__(self):
-        self.owner = None 
-
-class Card():
-
-    def __init__(self, i , j):
-        self.color = i
-        self.number = j
-
 class Environment():
-    metadata = {'render.modes': ['human']}
-
+    
     def __init__(self, player=0, turn=1):
         
         self.layout = [
@@ -39,7 +24,9 @@ class Environment():
         ]
         self.player = player
         self.turn = turn
-        self.flags = [Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag()]
+        self.flags = [{'owner' : None}, {'owner' : None}, {'owner' : None}, 
+                      {'owner' : None}, {'owner' : None}, {'owner' : None}, 
+                      {'owner' : None}, {'owner' : None}, {'owner' : None}]
         self.hands = [
                         [],
                         []
@@ -47,12 +34,11 @@ class Environment():
         self.stock = []
 
         for i in range(10, 70, 1):
-            self.stock.append(Card(i//10, i%10+1))
+            self.stock.append({'color': i//10, 'number' : i%10+1})
             random.shuffle(self.stock)
         
         self.hands[0] = self.stock[0:7]
         self.hands[1] = self.stock[7:14]
-        #print('{}| '.format("stock"), end='')
 
     def reset(self):
         self.layout = [
@@ -65,7 +51,9 @@ class Environment():
         ]
         self.player = 0
         self.turn = 1
-        self.flags = [Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag()]
+        self.flags = [{'owner' : None}, {'owner' : None}, {'owner' : None}, 
+                      {'owner' : None}, {'owner' : None}, {'owner' : None}, 
+                      {'owner' : None}, {'owner' : None}, {'owner' : None}]
         self.hands = [
                         [],
                         []
@@ -73,7 +61,7 @@ class Environment():
         self.stock = []
 
         for i in range(10, 70, 1):
-            self.stock.append(Card(i//10, i%10+1))
+            self.stock.append({'color': i//10, 'number' : i%10+1})
             random.shuffle(self.stock)
         
         self.hands[0] = self.stock[0:7]
@@ -86,13 +74,13 @@ class Environment():
         print('{}| '.format("flags"), end='')
 
         for j in range(len(self.flags)):
-            print('\t{} '.format(self.flags[j].owner), end='')
+            print('\t{} '.format(self.flags[j]['owner']), end='')
         
         print('\n')
         print('{}| \n'.format("e.hand"), end='')
 
         for i in range(len(self.hands[1])):
-            print(json.dumps({'color':self.hands[1][i].color, 'num':self.hands[1][i].number}))
+            print(json.dumps({'color':self.hands[1][i]['color'], 'num':self.hands[1][i]['number']}))
                 
         for i in range(length):
             player = length-i-1
@@ -100,13 +88,13 @@ class Environment():
             
             for l in range(len(self.layout[player])):
                 for card in self.layout[player][l]:
-                    print(' {} '.format(json.dumps({'from':l, 'color':card.color, 'num':card.number}), end=''))
+                    print(' {} '.format(json.dumps({'from':l, 'color':card['color'], 'num':card['number']}), end=''))
                     
         print('\n')
         print('{}| \n'.format("s.hand"), end='')
 
         for i in range(len(self.hands[0])):
-            print(json.dumps({'color':self.hands[0][i].color, 'num':self.hands[0][i].number}))
+            print(json.dumps({'color':self.hands[0][i]['color'], 'num':self.hands[0][i]['number']}))
         print('\n')
         
     def choice(self, player=0, turn=1, a=0, b=0):
@@ -121,7 +109,7 @@ class Environment():
     
     def check(self, a, b, player):
         # 勝敗がついていない、かつ3枚おかれていない
-        if not self.flags[a].owner and len(self.layout[player][a]) < 3:
+        if not self.flags[a]['owner'] and len(self.layout[player][a]) < 3:
 
             # 負け確は置かない
             if not self.winnerCheck(a, b, player):
@@ -131,20 +119,19 @@ class Environment():
     
     def winnerCheck(self, a, b, player):
         eScore = 0
-        eMax = 0
+        eSum = 0
         if len(self.layout[player][a]) == 2 and len(self.layout[(player+1)%2][a]) == 3:
-            #eScore, eMax = self.judge(player, a)
-            # 確定している手
-            eScore, eMax = self.judge((player+1)%2, a)
+                        # 確定している手
+            eScore, eSum = self.judge((player+1)%2, a)
 
             # 出そうとしている役
             cards = copy.deepcopy(self.layout[player][a])
             cards.append(self.hands[player][b])
-            lScore, lMax = self.score(cards)
+            lScore, lSum = self.score(cards)
 
             if lScore > eScore:
                 return True
-            elif lScore == eScore and lMax > eMax:
+            elif lScore == eScore and lSum > eSum:
                 return True
 
         return False
@@ -154,7 +141,6 @@ class Environment():
         cards = copy.deepcopy(self.layout[ePlayer][judge])
 
         # 場と手札から相手の最大の役を予測
-        #lStock = copy.deepcopy(self.hands[ePlayer])
         lStock = []
         lStock.extend(copy.deepcopy(self.hands[(ePlayer+1)%2]))
         eStock = copy.deepcopy(self.stock)
@@ -164,61 +150,55 @@ class Environment():
             lStock.extend(copy.deepcopy(self.layout[1][r]))
         
         for ls in lStock:
-            eStock = list(itertools.filterfalse(lambda x: x.color == ls.color and x.number == ls.number, eStock))
+            eStock = list(itertools.filterfalse(lambda x: x['color'] == ls['color'] and x['number'] == ls['number'], eStock))
 
         # 場と手札から相手の最大の役を予測
         eScore = 0
-        eMax = 0
+        eSum = 0
 
         #for x in range(len(eStock)+len(cards)-2):
         for x in combinations(eStock, 3-len(cards)):
             # 場の状態
             layout = copy.deepcopy(cards)
-            #layout.append(eStock[x])
 
             for i in range(len(x)):
                 layout.append(x[i])
                         
-            score, max = self.score(layout)
+            score, sum = self.score(layout)
 
             if score > eScore:
                 eScore = score
-                eMax = max
-            elif score == eScore and max > eMax:
-                eMax = max
+                eSum = sum
+            elif score == eScore and sum > eSum:
+                eSum = sum
         
-        return eScore, eMax
+        return eScore, eSum
     
     def checkFlag(self, a, player, turn=1):
         
-        if not self.flags[a].owner:
+        if not self.flags[a]['owner']:
             # 場のカード枚数
             s = self.layout[0][a]
             e = self.layout[1][a]
 
-            # 山札を取得
-            #rStock = copy.deepcopy(self.stock[turn + 14:])
-            #for i in range(len(rStock)):
-            #    print('山札：{}'.format(json.dumps({'color':rStock[i].color, 'num':rStock[i].number})))
-            
             # お互いの役が確定した場合
             if len(s) == 3 and len(e) == 3:
                 
                 # それぞれの役を取得 
-                sScore, sMax = self.score(s)
-                eScore, eMax = self.score(e)
+                sScore, sSum = self.score(s)
+                eScore, eSum = self.score(e)
 
                 if sScore > eScore:
-                    self.flags[a].owner = 0
+                    self.flags[a]['owner'] = 0
                 elif sScore < eScore:
-                    self.flags[a].owner = 1
+                    self.flags[a]['owner'] = 1
                 else:
-                    if sMax > eMax:
-                        self.flags[a].owner = 0
-                    elif sMax < eMax:
-                        self.flags[a].owner = 1
+                    if sSum > eSum:
+                        self.flags[a]['owner'] = 0
+                    elif sSum < eSum:
+                        self.flags[a]['owner'] = 1
                     else:
-                        self.flags[a].owner = (self.player+1)%2
+                        self.flags[a]['owner'] = (self.player+1)%2
             else:
                 # 片方のみ役が確定している場合の判定
                 for judge in range(9):
@@ -241,30 +221,30 @@ class Environment():
                             lPlayer = 1
             
                         # 最大（予測）の役
-                        eScore, eMax = self.judge(ePlayer, judge)
+                        eScore, eSum = self.judge(ePlayer, judge)
                         
                         # 確定の役
-                        lScore, lMax = self.score(self.layout[lPlayer][judge])
+                        lScore, lSum = self.score(self.layout[lPlayer][judge])
 
                         if lScore > eScore:
-                            self.flags[judge].owner = lPlayer
-                        elif lScore == eScore and lMax >= eMax:
-                            self.flags[judge].owner = lPlayer
+                            self.flags[judge]['owner'] = lPlayer
+                        elif lScore == eScore and lSum >= eSum:
+                            self.flags[judge]['owner'] = lPlayer
 
     def isThree(self, cards):
-        return cards[0].number == cards[1].number and cards[1].number == cards[2].number
+        return cards[0]['number'] == cards[1]['number'] and cards[1]['number'] == cards[2]['number']
     
     def isFlush(self, cards):
-        return cards[0].color == cards[1].color and cards[1].color == cards[2].color
+        return cards[0]['color'] == cards[1]['color'] and cards[1]['color'] == cards[2]['color']
     
     def isStraight(self, numList):
         return numList[2] - numList[1] == 1 and numList[1] - numList[0] == 1
 
     def score(self, cards):
         # 数字の配列を生成(昇順)
-        numList = [i.number for i in cards]
+        numList = [i['number'] for i in cards]
         numList.sort()
-        max = numList[2]
+        sum = numList[0] + numList[1] + numList[2]
 
         if self.isFlush(cards) and self.isStraight(numList):
             score = 5
@@ -276,33 +256,37 @@ class Environment():
             score = 2
         else:
             score = 1
-        return score, max
+        return score, sum
     
     def winner(self):
-        s,e = 0,0
-        for i in range(0, len(self.flags), 1):
-            if self.flags[i].owner == 0:
-                s = s+1
-            elif self.flags[i].owner == 1:
-                e = e+1
         
-        return s,e
+        winner = None
+        s,e = 0,0
+        for i in range(len(self.flags)):
 
-def get_action(layout, other_layout, flags, hand, other_hand_length, stock_length, play_first):
+            # 3連続チェック
+            if self.flags[i]['owner']:
+                if i < 7:
+                    if self.flags[i]['owner'] == self.flags[i+1]['owner'] and self.flags[i+1]['owner'] == self.flags[i+2]['owner']:
+                        return self.flags[i]['owner']
 
-    def get_legal_actions():
-        for i, _ in enumerate(hand):
-            for j, (flag, layout_line) in enumerate(zip(flags, layout)):
-                 if flag.owner is None and len(layout_line) < 3:
-                    yield{'from':i, 'to':j}
+            if self.flags[i]['owner'] == 0:
+                s += 1
+            elif self.flags[i]['owner'] == 1:
+                e += 1
+        
+        if s >= 5:
+            winner = 0
+        elif e >= 5:
+            winner = 1
 
-    return tuple(get_legal_actions())[0]
+        return winner
 
 if __name__ == "__main__":
     local = Environment()
     local.print()
     ai = action.AI()
-    command = buttle_line_env.xxx()
+    command = buttle_line_env.alpha()
 
     while True:
         input_play_first = input("ENTER COMMAND (f to play_first) >>> ")
@@ -328,9 +312,9 @@ if __name__ == "__main__":
                 play_first = turn % 2 == 1
 
                 if not (input_play_first == 'f') ^ play_first:               
-                    #other_layout = copy.deepcopy(local.layout[(player+1)%2])
-                    choice, num = command.operation_alpha(local.layout[player], local.layout[(player+1)%2], local.flags, local.hands[player], len(local.hands[(player+1)%2]), 46-turn, play_first)
-                    #local.layout[(player+1)%2] = other_layout 
+
+                    num, choice = command.operation_alpha(local.layout[player], local.layout[(player+1)%2], local.flags, local.hands[player], len(local.hands[(player+1)%2]), 46-turn, play_first)
+
                 else:
                     # カード選択（ランダム選択）
                     choice, num = ai.action(local.layout[player], local.layout[(player+1)%2], local.flags, local.hands[player], len(local.hands[(player+1)%2]), 46-turn, play_first)
@@ -339,8 +323,7 @@ if __name__ == "__main__":
                 card = local.hands[player].pop(num)
                 local.layout[player][choice].append(card)
 
-            #action = get_action(local.layout[0], local.layout[1], local.flags, local.hands[0], len(local.hands[1]), 46-turn, True)
-            print(json.dumps({'from':choice, 'to':num}))
+            print(json.dumps({'from':num, 'to':choice}))
             
             #ドロー
             if turn < 47:
@@ -353,19 +336,13 @@ if __name__ == "__main__":
             local.print()
             player = (player+1)%2
 
-            s,e = local.winner()
+            winner = local.winner()
 
-            if s == 3 and e == 0:
+            if winner == 0:
                 print('player0 win!!')
                 break
-            elif s == 0 and e == 3:
+            elif winner == 1:
                 print('player1 win!!')
-                break
-            elif  s >= 5 or e>= 5:
-                if s > e:
-                    print('player0 win!!')
-                else:
-                    print('player1 win!!')
                 break
 
         break

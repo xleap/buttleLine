@@ -4,41 +4,28 @@ import pickle
 import copy
 import json
 import random
-import typing
+import itertools
 from dataclasses import dataclass
+from typing import Any, List, Tuple, cast
 
-assert os.path.isdir("./simple_distributed_rl/srl/")  # srlがここにある想定です
-sys.path.insert(0, "./simple_distributed_rl/")
-from typing import Any, List, Optional, Tuple, cast
+abs_path = os.path.dirname(os.path.abspath(__file__))
+assert os.path.isdir(abs_path + "/simple_distributed_rl/srl/")  # srlがここにある想定です
+sys.path.insert(0, abs_path + "/simple_distributed_rl/")
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
+import numpy as np
 import srl
-
 from srl import runner
 from srl.algorithms import ql
 from srl.base.env import registration
 from srl.base.env.genre import TurnBase2Player
 from srl.base.spaces.space import SpaceBase
-from srl.base.define import EnvObservationTypes, InfoType
-from srl.base.rl.algorithms.modelbase import ModelBaseWorker
-from srl.rl.functions.common import random_choice_by_probs, render_discrete_action, to_str_observation
-
-import numpy as np
-
-from srl.base.define import RLTypes
+from srl.base.define import EnvObservationTypes
 from srl.base.env.env_run import EnvRun, SpaceBase
-from srl.base.env.registration import register
-from srl.base.rl.algorithms.discrete_action import DiscreteActionConfig, DiscreteActionWorker
-from srl.base.rl.base import RLParameter, RLTrainer
-from srl.base.rl.registration import register
-from srl.base.rl.remote_memory import SequenceRemoteMemory
 from srl.base.rl.config import RLConfig
 from srl.base.rl.processor import Processor
-from srl.base.rl.worker import RuleBaseWorker
 from srl.base.rl.worker_run import WorkerRun
-from srl.base.spaces import ArrayDiscreteSpace, DiscreteSpace, BoxSpace
-from srl.rl.models import alphazero as alphazero_model
-from srl.rl.models import mlp
-from srl.utils import common
+from srl.base.spaces import ArrayDiscreteSpace, DiscreteSpace
 from srl.algorithms import alphazero
 
 import action as action_ai
@@ -49,24 +36,13 @@ registration.register(
     kwargs={},
 )
 
-class Flag():
-    
-     def __init__(self):
-        self.owner = None 
-
-class Card():
-
-    def __init__(self, i , j):
-        self.color = i
-        self.number = j
-
 class ButtleLineEnv(TurnBase2Player):
     W: int = 9
     H: int = 6
     C: int = 7
     action_ai = action_ai.AI()
     state = None
-    step_rewards = [0, 0]
+    step_rewards = np.array([0.0, 0.0])
     done = False
 
     def __init__(self):
@@ -102,7 +78,9 @@ class ButtleLineEnv(TurnBase2Player):
                 [],[],[],[],[],[],[],[],[]
             ]
         ]
-        self.flags = [Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag(), Flag()]
+        self.flags = [{'owner' : None}, {'owner' : None}, {'owner' : None}, 
+                      {'owner' : None}, {'owner' : None}, {'owner' : None}, 
+                      {'owner' : None}, {'owner' : None}, {'owner' : None}]
         self.hands = [
                         [],
                         []
@@ -113,7 +91,7 @@ class ButtleLineEnv(TurnBase2Player):
         self.field = [0] * (self.W * self.H)
 
         for i in range(10, 70, 1):
-            self.stock.append(Card(i//10, i%10+1))
+            self.stock.append({'color': i//10, 'number' : i%10+1})
             random.shuffle(self.stock)
         
         self.hands[0] = self.stock[0:7]
@@ -134,16 +112,17 @@ class ButtleLineEnv(TurnBase2Player):
         # 置かれている枚数
         l = len(self.layout[self._next_player_index][w])
 
+        # 反則手判定
         if l >= 3:
             if self._next_player_index == 0:
-                return self.field, -100000, self.step_rewards[1], True, {}
+                self.step_rewards[0] -= 1.0
+                self.step_rewards[1] += 1.0
             else:
-                return self.field, self.step_rewards[0], -100000, True, {}
-
-        # 役ができたら加点
-        add_score, add_num_max = self.add(action)
-        add = 0.5 * add_score + 0.02 * add_num_max - 0.0001
-
+                self.step_rewards[0] += 1.0
+                self.step_rewards[1] -= 1.0
+            
+            return self.field, self.step_rewards[0], self.step_rewards[1], True, {}
+        
         enemy_player = 1 if self._next_player_index == 0 else 0
         my_player = 0 if self._next_player_index == 0 else 1
 
@@ -152,29 +131,30 @@ class ButtleLineEnv(TurnBase2Player):
 
         self.checkFlag(action%9, my_player, enemy_player, self.turn)
 
-        # 勝敗判定
-        s,e = self.winner()
+        # 加点計算
+        add_score = add_num_sum = add = 0.0
 
-        if s == 3 and e == 0:
-            self.step_rewards[0] += 1.5
+        if l == 2:
+            # 役ができたら加点
+            add_score, add_num_sum = self.add(w, my_player)
+            add = 0.1 * add_score + 0.01 * add_num_sum
+        elif l == 1:
+            # 自分が作れる最大の役を予測
+            add_score, add_num_sum = self.estimate(w, my_player, enemy_player)
+            add = 0.1 * (add_score - 1)
+
+        # 勝敗判定
+        winner = self.winner()
+
+        # 報酬設定
+        if winner == 0:
+            self.step_rewards[0] += 1.0
+            self.step_rewards[1] -= 1.0
             self.done = True
-        elif s == 0 and e == 3:
-            self.step_rewards[1] += 1.5
+        elif winner == 1:
+            self.step_rewards[0] -= 1.0
+            self.step_rewards[1] += 1.0
             self.done = True
-        elif  s >= 5 or e>= 5:
-            if s > e:
-                self.step_rewards[0] += 1
-                self.done = True
-            else:
-                self.step_rewards[1] += 1
-                self.done = True
-        else:
-            if len(self.invalid_actions[0]) == self.W * self.C:
-                self.step_rewards[1] += 1
-                self.done = True
-            elif len(self.invalid_actions[1]) == self.W * self.C:
-                self.step_rewards[0] += 1
-                self.done = True
 
         # 手番交代
         self._next_player_index = enemy_player
@@ -200,6 +180,7 @@ class ButtleLineEnv(TurnBase2Player):
                 self.layout,
                 self.flags,
                 self.turn,
+                self.step_rewards,
             ]
         )
 
@@ -215,6 +196,7 @@ class ButtleLineEnv(TurnBase2Player):
         self.layout = d[7]
         self.flags = d[8]
         self.turn = d[9]
+        self.step_rewards = d[10]
     
     def _calc_invalid_actions(self, player_index) -> List[int]:
         
@@ -255,7 +237,7 @@ class ButtleLineEnv(TurnBase2Player):
         # 配置した場所
         point = (self._next_player_index * self.W * 3) + w + (l * self.W)
         # --- update
-        self.field[point] = (select_card.color * 10) + (select_card.number - 1)
+        self.field[point] = (select_card['color'] * 10) + (select_card['number'] - 1)
 
         # 選択したカードを場に出す
         card = self.hands[self._next_player_index].pop(c)
@@ -275,7 +257,7 @@ class ButtleLineEnv(TurnBase2Player):
         return self.invalid_actions[player_num]
 
     #def get_invalid_actions(self) -> List[int]:
-    #   return self.invalid_actions[self._next_player_index]
+    #       return self.invalid_actions[self._next_player_index]
     
     def checkFlag(self, layout_num, my_player, enemy_player, turn=1):
 
@@ -291,19 +273,19 @@ class ButtleLineEnv(TurnBase2Player):
             eScore, eMax = self.action_ai.score(enemy_player_cards)
 
             if sScore > eScore:
-                self.flags[layout_num].owner = my_player
+                self.flags[layout_num]['owner'] = my_player
             elif sScore < eScore:
-                self.flags[layout_num].owner = enemy_player
+                self.flags[layout_num]['owner'] = enemy_player
             else:
                 if sMax > eMax:
-                    self.flags[layout_num].owner = my_player
+                    self.flags[layout_num]['owner'] = my_player
                 elif sMax < eMax:
-                    self.flags[layout_num].owner = enemy_player
+                    self.flags[layout_num]['owner'] = enemy_player
                 else:
                     if turn%2 == 1:
-                        self.flags[layout_num].owner = enemy_player
+                        self.flags[layout_num]['owner'] = enemy_player
                     else:
-                        self.flags[layout_num].owner = my_player
+                        self.flags[layout_num]['owner'] = my_player
         
         for judge in range(self.W):
 
@@ -333,40 +315,69 @@ class ButtleLineEnv(TurnBase2Player):
                 lScore, lMax = self.action_ai.score(self.layout[lPlayer][judge])
 
                 if lScore > eScore:
-                    self.flags[judge].owner = lPlayer
+                    self.flags[judge]['owner'] = lPlayer
                 elif lScore == eScore and lMax >= eMax:
-                    self.flags[judge].owner = lPlayer
+                    self.flags[judge]['owner'] = lPlayer
 
     def winner(self):
         
+        winner = None
         s,e = 0,0
         for i in range(len(self.flags)):
-            if self.flags[i].owner == 0:
+
+            # 3連続チェック
+            if self.flags[i]['owner']:
+                if i < 7:
+                    if self.flags[i]['owner'] == self.flags[i+1]['owner'] and self.flags[i+1]['owner'] == self.flags[i+2]['owner']:
+                        return self.flags[i]['owner']
+
+            if self.flags[i]['owner'] == 0:
                 s += 1
-            elif self.flags[i].owner == 1:
+            elif self.flags[i]['owner'] == 1:
                 e += 1
         
-        return s,e
-    
-    def add(self, action):
-    
-        # 置く場所
-        w = action%9
-        # 選択したカードの番号
-        c = action//9
+        if s >= 5:
+            winner = 0
+        elif e >= 5:
+            winner = 1
 
-        # 置かれている枚数
-        l = len(self.layout[self._next_player_index][w])
+        return winner
+    
+    def add(self, w, my_player):
         
-        score, num_max = 0, 0
+        # 出そうとしている役のスコア
+        cards = copy.deepcopy(self.layout[my_player][w])
 
-        if l == 2:
-            # 出そうとしている役のスコア
-            cards = copy.deepcopy(self.layout[self._next_player_index][w])
-            cards.append(self.hands[self._next_player_index][c])
-            score, num_max = self.action_ai.score(cards)
+        return self.action_ai.score(cards)
+         
+    # 自分の最大の役を予測
+    def estimate(self, w, my_player, enemy_player):
+
+        lStock = []
+        eStock = copy.deepcopy(self.stock)
+
+        for l in range(9):
+            lStock.extend(copy.deepcopy(self.layout[my_player][l]))
+            lStock.extend(copy.deepcopy(self.layout[enemy_player][l]))
         
-        return score, num_max
+        for ls in lStock:
+            eStock = list(itertools.filterfalse(lambda x: x['color'] == ls['color'] and x['number'] == ls['number'], eStock))
+
+        # 自分の最大の役を予測
+        eScore = eSum = 0
+
+        for x in range(len(eStock) - 2):
+            # 場の状態
+            eLayout = copy.deepcopy(self.layout[my_player][w])
+            eLayout.append(eStock[x])
+           
+            score, sum = self.action_ai.score(eLayout)
+
+            if score > eScore:
+                eScore = score
+                eSum = sum
+        
+        return eScore, eSum
 
 class LayerProcessor(Processor):
 
@@ -385,7 +396,7 @@ class LayerProcessor(Processor):
         _field = np.zeros(_env.H * _env.W)
         return _field
 
-class xxx():
+class alpha():
     
     env_config = srl.EnvConfig("ButtleLineEnv")
     rl_config = alphazero.Config(
@@ -394,7 +405,7 @@ class xxx():
         batch_size=64
     )
 
-    best_parameter_path = "_best_player3.dat"
+    best_parameter_path = abs_path + "/_best_player5.dat"
     rl_config.parameter_path = best_parameter_path  # ベストプレイヤーから毎回始める
     rl_config.processors = [LayerProcessor()]
     config = runner.Config(env_config, rl_config)
@@ -403,40 +414,73 @@ class xxx():
 
     def operation_alpha(self, layout, other_layout, flags, hand, other_hand_length, stock_length, play_first):
 
-        env = ButtleLineEnv()
-        worker = self.config.make_worker_player(self.rl_config, self.parameter)
-        worker.on_reset(env)
+        foul_count = 0
 
-        env.call_reset()
-        env.flags = copy.deepcopy(flags)
-        env.turn = 46 - stock_length
-        env._next_player_index = (stock_length + 1 ) % 2
-        
-        player = 0 if play_first else 1
-        other = 1 if play_first else 0
-       
-        env.layout[player] = copy.deepcopy(layout)
-        env.layout[other] = copy.deepcopy(other_layout)   
-        env.hands[player] = copy.deepcopy(hand)
-     
-        env.invalid_actions = [
-            env._calc_invalid_actions(0),
-            env._calc_invalid_actions(1),
-        ]
-        
-        action = worker.policy(env)
-        #print(action)
-        # 置く場所
-        choice = action%9
-        # 選択したカードの番号
-        num = action//9
+        while True:
 
-        # 置かれている枚数
-        #l = len(env.layout[env._next_player_index][choice])
-        # 配置した場所
-        #point = (env._next_player_index * env.W * 3) + choice + (l * env.W)
-        #print(point)
-        #env.field[point] = action
-        #print(env.field)
+            env = ButtleLineEnv()
+            worker = self.config.make_worker_player(self.rl_config, self.parameter)
+            worker.on_reset(env)
+
+            env.call_reset()
+            env.flags = copy.deepcopy(flags)
+            env.turn = 46 - stock_length
+            env._next_player_index = (stock_length + 1) % 2
+            
+            player = 0 if play_first else 1
+            other = 1 if play_first else 0
         
-        return choice, num    
+            env.layout[player] = copy.deepcopy(layout)
+            env.layout[other] = copy.deepcopy(other_layout)   
+            env.hands[player] = copy.deepcopy(hand)
+        
+            env.invalid_actions = [
+                env._calc_invalid_actions(0),
+                env._calc_invalid_actions(1),
+            ]
+            
+            try:
+                action = worker.policy(env)
+            except:
+                print('リトライ', file=sys.stderr) 
+                continue
+            
+            # 置く場所
+            choice = action%9
+            # 選択したカードの番号
+            num = action//9
+
+            # 反則手(3枚以上置かれている、またはフラッグ獲得済)
+            if(len(env.layout[player][choice]) > 2 or env.flags[choice]['owner']):
+                
+                # 20回連続はゲーム側の問題のため続行
+                if(foul_count < 20):
+                    foul_count += 1
+                    print('再抽選{}回目'.format(foul_count), file=sys.stderr) 
+                    continue
+                else:
+                    print('最終抽選', file=sys.stderr) 
+
+                    layout = env.layout[player]
+                    hand = env.hands[player]
+                    score = sum = 0
+                    
+                    for c in range(len(hand)):
+                        for w in range(len(layout)):
+                            if env.flags[w]['owner'] is None and len(layout[w]) < 3:
+
+                                eScore = eSum = 0
+
+                                if  len(layout[w]) == 2:
+                                    cards = copy.deepcopy(layout[w])
+                                    cards.append(hand[c])
+                                    eScore, eSum = env.action_ai.score(cards)
+
+                                # 期待値が一番高いものを選択（勝てるとは限らない）
+                                if (score == 0 and sum == 0) or eScore > score or (eScore == score and eSum > sum):
+                                    score = eScore
+                                    sum = eSum
+                                    num = c
+                                    choice = w
+
+            return num, choice    
